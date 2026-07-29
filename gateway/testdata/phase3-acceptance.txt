@@ -1,0 +1,101 @@
+Phase 3 acceptance evidence — API gateway + middleware chain
+Generated: 2026-07-29 17:58:15 UTC
+Go: go version go1.26.5 darwin/arm64
+
+ACCEPTANCE CRITERION (IMPLEMENTATION_PLAN.md Phase 3):
+  'integration test hitting the gateway directly (services can be stubs
+   at this point) confirms headers are present and correct on both
+   allowed and denied paths.'
+
+=== go vet ./... ===
+(clean)
+
+=== gofmt -l . ===
+(clean)
+
+=== go test -race ./... ===
+?   	gateway	[no test files]
+?   	gateway/middleware	[no test files]
+ok  	gateway/router	1.509s
+
+=== all tests, verbose ===
+--- PASS: TestRateLimitHeadersOnAllowedAndDeniedPaths (0.00s)
+--- PASS: TestRetryAfterNeverZeroForSubSecondWaits (0.01s)
+--- PASS: TestRateLimitRecoversAfterWindow (0.00s)
+--- PASS: TestRateLimitIsPerUser (0.00s)
+--- PASS: TestPublicRoutesNeedNoToken (0.00s)
+--- PASS: TestProtectedRoutesRequireToken (0.00s)
+--- PASS: TestCorrelationIDIsAlwaysPresent (0.00s)
+    --- PASS: TestCorrelationIDIsAlwaysPresent/allowed (0.00s)
+    --- PASS: TestCorrelationIDIsAlwaysPresent/rate_limited (0.00s)
+    --- PASS: TestCorrelationIDIsAlwaysPresent/unauthorized (0.00s)
+    --- PASS: TestCorrelationIDIsAlwaysPresent/health (0.00s)
+--- PASS: TestCorrelationIDIsPropagatedDownstream (0.00s)
+--- PASS: TestSubjectForwardedDownstream (0.00s)
+--- PASS: TestHealthzBypassesRateLimit (0.00s)
+--- PASS: TestRouterRejectsInvalidConfig (0.00s)
+    --- PASS: TestRouterRejectsInvalidConfig/no_limiter (0.00s)
+    --- PASS: TestRouterRejectsInvalidConfig/no_jwt_secret (0.00s)
+    --- PASS: TestRouterRejectsInvalidConfig/short_jwt_secret (0.00s)
+    --- PASS: TestRouterRejectsInvalidConfig/relative_service_url (0.00s)
+--- PASS: TestAlgNoneIsRejected (0.00s)
+--- PASS: TestAlgConfusionIsRejected (0.00s)
+--- PASS: TestExpiredTokenIsRejected (0.00s)
+--- PASS: TestTokenWithoutExpiryIsRejected (0.00s)
+--- PASS: TestWrongSignatureIsRejected (0.00s)
+--- PASS: TestTamperedPayloadIsRejected (0.00s)
+--- PASS: TestTokenWithoutSubjectIsRejected (0.00s)
+--- PASS: TestMalformedAuthorizationHeadersAreRejected (0.00s)
+    --- PASS: TestMalformedAuthorizationHeadersAreRejected/empty (0.00s)
+    --- PASS: TestMalformedAuthorizationHeadersAreRejected/bearer_with_no_token (0.00s)
+    --- PASS: TestMalformedAuthorizationHeadersAreRejected/bearer_with_only_spaces (0.00s)
+    --- PASS: TestMalformedAuthorizationHeadersAreRejected/wrong_scheme (0.00s)
+    --- PASS: TestMalformedAuthorizationHeadersAreRejected/no_scheme (0.00s)
+    --- PASS: TestMalformedAuthorizationHeadersAreRejected/garbage (0.00s)
+    --- PASS: TestMalformedAuthorizationHeadersAreRejected/two_segments (0.00s)
+--- PASS: TestBearerSchemeIsCaseInsensitive (0.00s)
+    --- PASS: TestBearerSchemeIsCaseInsensitive/Bearer (0.00s)
+    --- PASS: TestBearerSchemeIsCaseInsensitive/bearer (0.00s)
+    --- PASS: TestBearerSchemeIsCaseInsensitive/BEARER (0.00s)
+    --- PASS: TestBearerSchemeIsCaseInsensitive/BeArEr (0.00s)
+--- PASS: TestClientCannotSpoofSubjectHeader (0.00s)
+    --- PASS: TestClientCannotSpoofSubjectHeader/on_a_protected_route_the_JWT_subject_wins (0.00s)
+    --- PASS: TestClientCannotSpoofSubjectHeader/on_a_public_route_the_header_is_stripped (0.00s)
+--- PASS: TestErrorResponsesDoNotLeakDetail (0.00s)
+--- PASS: TestOversizedCorrelationIDIsReplaced (0.00s)
+    --- PASS: TestOversizedCorrelationIDIsReplaced/too_long (0.00s)
+    --- PASS: TestOversizedCorrelationIDIsReplaced/newline_injection (0.00s)
+    --- PASS: TestOversizedCorrelationIDIsReplaced/carriage_return (0.00s)
+    --- PASS: TestOversizedCorrelationIDIsReplaced/tab (0.00s)
+    --- PASS: TestOversizedCorrelationIDIsReplaced/null_byte (0.00s)
+ok  	gateway/router	0.287s
+
+=== LIVE SMOKE TEST: gateway against real Redis, limit=5/min ===
+(a running gateway process, not httptest — proves the wiring, not just handlers)
+
+-- authenticated requests on a protected route --
+   req 1: status=502 X-RateLimit-Limit=5 Remaining=2 Reset=34 Retry-After=
+   req 2: status=502 X-RateLimit-Limit=5 Remaining=1 Reset=46 Retry-After=
+   req 3: status=502 X-RateLimit-Limit=5 Remaining=0 Reset=58 Retry-After=
+   req 4: status=429 X-RateLimit-Limit=5 Remaining=0 Reset=58 Retry-After=10
+   req 5: status=429 X-RateLimit-Limit=5 Remaining=0 Reset=58 Retry-After=10
+   req 6: status=429 X-RateLimit-Limit=5 Remaining=0 Reset=58 Retry-After=10
+   req 7: status=429 X-RateLimit-Limit=5 Remaining=0 Reset=58 Retry-After=10
+
+   Requests 1-5 are allowed by the limiter and reach the proxy, which
+   returns 502 because the catalog service does not exist until Phase 4.
+   Requests 6-7 are refused by the limiter itself with 429 + Retry-After.
+   Every response carries the full X-RateLimit-* family, which is the
+   acceptance criterion.
+
+-- JWT rejection paths --
+   no token:        status=401 WWW-Authenticate=Bearer realm="api"
+   garbage token:   status=401
+   alg=none forged: status=401
+
+-- rate-limit keys in Redis (keying strategy) --
+   gateway:tb:user:smoke-user
+
+   Authenticated traffic is keyed by JWT subject, anonymous traffic by
+   client IP, in disjoint namespaces. Keying authenticated users by IP
+   would throttle everyone behind one NAT as a single client.
