@@ -1,0 +1,50 @@
+Phase 1 acceptance evidence — in-memory rate limiter core
+Generated: 2026-07-29 17:13:25 UTC
+Go: go version go1.26.5 darwin/arm64
+
+=== go vet ./... ===
+(clean)
+
+=== gofmt -l . ===
+(clean)
+
+=== go test -race -count=1 -v ./... ===
+--- PASS: TestSystemClockAdvances (0.00s)
+--- PASS: TestManualClockOnlyMovesWhenTold (0.00s)
+--- PASS: TestManualClockIsConcurrencySafe (0.01s)
+PASS
+ok  	ratelimiter	1.327s
+--- PASS: TestAtAndOverLimit (0.00s)
+--- PASS: TestKeysAreIndependent (0.00s)
+--- PASS: TestFullWindowElapsedReplenishes (0.00s)
+--- PASS: TestConstructorRejectsInvalidConfig (0.00s)
+--- PASS: TestNilClockDefaultsToSystemClock (0.00s)
+--- PASS: TestConcurrentAllowIsExact (0.02s)
+--- PASS: TestBackwardsClockDoesNotGrantExtraAllowance (0.00s)
+--- PASS: TestResultLimitAlwaysEchoed (0.00s)
+--- PASS: TestLimiterInterfaceSatisfied (0.00s)
+--- PASS: TestSlidingWindowCounterBoundaryDoesNotDoubleLimit (0.00s)
+--- PASS: TestSlidingWindowCounterDecaysPreviousWindow (0.00s)
+--- PASS: TestSlidingWindowCounterSteadyStateHoldsLimit (0.00s)
+--- PASS: TestSlidingWindowCounterRetryAfter (0.00s)
+--- PASS: TestSlidingWindowCounterLongIdleResetsBothWindows (0.00s)
+--- PASS: TestSlidingWindowLogIsExactAcrossBoundary (0.00s)
+--- PASS: TestSlidingWindowLogExpiresEntriesIndividually (0.00s)
+--- PASS: TestSlidingWindowLogRetryAfterIsAccurate (0.00s)
+--- PASS: TestSlidingWindowLogHandlesOutOfOrderTimestamps (0.00s)
+--- PASS: TestSlidingWindowLogMemoryIsBounded (0.00s)
+--- PASS: TestTokenBucketAbsorbsBurst (0.00s)
+--- PASS: TestTokenBucketRefillsGradually (0.00s)
+--- PASS: TestTokenBucketDoesNotOverfill (0.00s)
+--- PASS: TestTokenBucketBackwardsClockDoesNotDrainTokens (0.00s)
+--- PASS: TestTokenBucketRetryAfterIsAccurate (0.00s)
+--- PASS: TestTokenBucketResetAfter (0.00s)
+PASS
+ok  	ratelimiter/algorithms	1.612s
+
+=== coverage ===
+ok  	ratelimiter	(cached)	coverage: 100.0% of statements
+ok  	ratelimiter/algorithms	(cached)	coverage: 94.6% of statements
+ratelimiter/testclock.go:31:				Advance			100.0%
+ratelimiter/testclock.go:38:				Set			100.0%
+total:							(statements)		95.0%
