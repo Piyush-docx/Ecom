@@ -1,0 +1,24 @@
+# macOS
+.DS_Store
+
+# Generated knowledge-graph output. Regenerable from source, and its manifest
+# records absolute paths and local mtimes that are meaningless on any other
+# machine.
+graphify-out/
+
+# Go build and test artifacts
+*.exe
+*.test
+*.out
+coverage.html
+
+# go.work.sum is machine-local; go.work itself is committed so a clone gets the
+# multi-module layout for free.
+go.work.sum
+
+# Secrets — .env.example is committed instead (see IMPLEMENTATION_PLAN.md
+# Phase 9).
+.env
+.env.local
+*.pem
+*.key

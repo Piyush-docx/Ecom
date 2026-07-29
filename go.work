@@ -1,0 +1,10 @@
+go 1.22
+
+use (
+	./gateway
+	./ratelimiter
+	./services/auth
+	./services/catalog
+	./services/orders
+	./services/payment
+)
