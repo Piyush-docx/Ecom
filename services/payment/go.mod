@@ -1,3 +1,3 @@
 module services/payment
 
-go 1.22
+go 1.24

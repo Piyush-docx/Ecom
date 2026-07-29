@@ -1,0 +1,50 @@
+Phase 2 acceptance evidence — Redis-backed atomic rate limiter
+Generated: 2026-07-29 17:28:40 UTC
+Go: go version go1.26.5 darwin/arm64
+Redis: redis_version:7.4.9
+
+ACCEPTANCE CRITERION (IMPLEMENTATION_PLAN.md Phase 2):
+  'a concurrency test that fires N goroutines at the same key
+   simultaneously must allow exactly the configured limit through,
+   not limit±race-condition-slop.'
+
+=== go vet ./... ===
+(clean)
+
+=== ATOMICITY: 1000 concurrent goroutines, limit 100, one shared key ===
+    redis_test.go:163: 1000 concurrent requests against one key: exactly 100 allowed, 900 denied
+    redis_test.go:163: 1000 concurrent requests against one key: exactly 100 allowed, 900 denied
+    redis_test.go:163: 1000 concurrent requests against one key: exactly 100 allowed, 900 denied
+--- PASS: TestConcurrentAllowIsExact (0.23s)
+    --- PASS: TestConcurrentAllowIsExact/TokenBucket (0.11s)
+    --- PASS: TestConcurrentAllowIsExact/SlidingWindowLog (0.08s)
+    --- PASS: TestConcurrentAllowIsExact/SlidingWindowCounter (0.03s)
+ok  	ratelimiter/redis	0.555s
+
+=== CONTROL: the same test against a NON-atomic implementation ===
+    (GET then INCR as two round trips — the pattern AGENTS.md 2.2 forbids)
+    NON-ATOMIC (GET then INCR): 1000 allowed, want exactly 100
+    => over limit by 900: the test WOULD catch this
+
+    The control confirms this test can detect a race: the non-atomic
+    version admits 1000 of 1000 against a limit of 100, because every
+    goroutine reads the counter before any increment lands.
+
+=== FULL SUITE (-race) ===
+ok  	ratelimiter	1.227s
+ok  	ratelimiter/algorithms	1.507s
+ok  	ratelimiter/redis	14.977s
+
+=== Redis-backed tests, verbose ===
+--- PASS: TestConcurrentAllowIsExact (0.15s)
+--- PASS: TestAtAndOverLimit (0.00s)
+--- PASS: TestKeysAreIndependent (0.00s)
+--- PASS: TestSharedStateAcrossInstances (0.01s)
+--- PASS: TestKeysExpire (0.00s)
+--- PASS: TestWindowElapsesAndReplenishes (9.02s)
+--- PASS: TestSlidingWindowLogExpiresEntriesIndividually (1.56s)
+--- PASS: TestRetryAfterIsHonored (2.01s)
+--- PASS: TestConstructorRejectsInvalidConfig (0.01s)
+--- PASS: TestScriptCacheFlushIsRecoverable (0.02s)
+--- PASS: TestContextCancellationIsHonored (0.00s)
+ok  	ratelimiter/redis	13.088s
