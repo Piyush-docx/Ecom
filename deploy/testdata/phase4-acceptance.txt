@@ -1,0 +1,47 @@
+Phase 4 acceptance evidence — four microservices + end-to-end routing
+Generated: 2026-07-31 07:02:04 UTC
+Go: go version go1.26.5 darwin/arm64
+Postgres: 16.14
+
+ACCEPTANCE CRITERIA (IMPLEMENTATION_PLAN.md Phase 4):
+  'each service has integration tests against a real (test-container or
+   docker-compose) Postgres instance — not mocks for the DB layer.'
+  'Gateway can route to all four through Phase 3's middleware chain
+   end-to-end.'
+
+=== per-service databases (no shared tables, plan 1.3) ===
+  ecom
+  ecom_auth
+  ecom_catalog
+  ecom_orders
+  ecom_payment
+
+=== INTEGRATION TESTS against real Postgres (-race) ===
+  auth:     ok  	services/auth	2.526s
+  catalog:  ok  	services/catalog	2.385s
+  orders:   ok  	services/orders	2.029s
+  payment:  ok  	services/payment	1.996s
+
+=== END-TO-END through the gateway ===
+-- 1. signup on a public route, no token required --
+   201, JWT issued by auth and accepted by the gateway
+
+-- 2. protected routes reject anonymous requests --
+   /catalog/products    -> 401
+   /orders/             -> 401
+   /payment/charges     -> 401
+
+-- 3. authenticated cross-service checkout --
+   catalog: product created, stock=10
+   orders:  order c939e77d status=pending total=5000 (priced by catalog, not the client)
+   catalog: stock=10 reserved=2 available=8 (stock held for the pending order)
+   payment: 5e1b0685 status=succeeded
+   payment: redelivered charge returned 5e1b0685 — same id, exactly one charge
+
+-- 4. declined charge is a recorded outcome, not a lost request --
+   status=failed reason=card declined
+
+-- 5. one correlation ID spans the gateway and the services --
+   client sent X-Correlation-ID: evidence-trace-1785481338
+   orders log: msg='order created' correlation_id=evidence-trace-1785481338
+   This is the Phase 6 capability: one ID reconstructs a request's path.
