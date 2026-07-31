@@ -12,6 +12,14 @@ graphify-out/
 *.out
 coverage.html
 
+# Compiled service and gateway binaries. `go build` inside a module directory
+# drops one named after the module, which is build output, not source.
+/gateway/gateway
+/services/auth/auth
+/services/catalog/catalog
+/services/orders/orders
+/services/payment/payment
+
 # go.work.sum is machine-local; go.work itself is committed so a clone gets the
 # multi-module layout for free.
 go.work.sum
