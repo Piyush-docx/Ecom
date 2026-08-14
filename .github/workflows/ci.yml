@@ -1,0 +1,195 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A new push to the same branch cancels the previous run: only the latest
+# commit's result is meaningful, and CI minutes spent on superseded commits are
+# wasted.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Matches the toolchain the modules declare. Pinned rather than "stable" so a
+  # new Go release cannot turn a green build red without a commit.
+  GO_VERSION: "1.24"
+
+jobs:
+  # Formatting and static analysis run without any services, so they fail fast
+  # and cheaply on the mistakes that do not need a database to detect.
+  lint:
+    name: format and vet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: "**/go.sum"
+
+      - name: gofmt
+        run: |
+          # gofmt -l prints files needing formatting and exits 0 either way, so
+          # the output has to be tested rather than the exit code.
+          unformatted=$(gofmt -l . 2>/dev/null)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+          echo "all files are gofmt'd"
+
+      - name: go vet
+        run: |
+          # This is a multi-module workspace, so `go vet ./...` from the root
+          # does not reach the modules. Each is vetted in its own directory.
+          set -e
+          for module in pkg ratelimiter gateway services/auth services/catalog services/orders services/payment; do
+            echo "==> vetting $module"
+            (cd "$module" && go vet ./...)
+          done
+
+  test:
+    name: test against real Postgres and Redis
+    runs-on: ubuntu-latest
+
+    services:
+      # The plan (§6) is explicit that the DB and Redis layers must not be
+      # mocked: a rate limiter test against a mocked Redis proves nothing about
+      # the atomicity claim, and a mocked Postgres would not exercise the unique
+      # indexes and CHECK constraints that prevent overselling and duplicate
+      # charges. These are the real thing.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ecom
+          POSTGRES_PASSWORD: ecom
+          POSTGRES_DB: ecom
+        ports:
+          - 5432:5432
+        # The job runs on the runner, not inside a container, so it reaches the
+        # service through the mapped port on localhost. The health check matters
+        # because an open port does not mean the server is ready to accept
+        # queries.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: "**/go.sum"
+
+      - name: create per-service databases
+        # deploy/postgres-init/ only runs on a fresh compose volume, which does
+        # not exist here — the service container is started directly from the
+        # image. The same databases have to be created explicitly, or every
+        # service's integration tests would skip and CI would pass while having
+        # verified nothing.
+        run: |
+          set -e
+          for db in ecom_auth ecom_catalog ecom_orders ecom_payment; do
+            PGPASSWORD=ecom psql -h localhost -U ecom -d ecom -c "CREATE DATABASE $db;"
+            echo "created $db"
+          done
+
+      - name: verify the services are actually reachable
+        # A skipped test suite looks identical to a passing one in the summary
+        # line. Since every integration test skips when its backend is
+        # unreachable, connectivity is asserted up front: a failure here is
+        # unambiguous, whereas a silent skip would let a broken CI report green.
+        run: |
+          set -e
+          PGPASSWORD=ecom psql -h localhost -U ecom -d ecom -c "SELECT version();" > /dev/null
+          echo "postgres reachable"
+          redis-cli -h localhost ping
+          echo "redis reachable"
+
+      - name: test
+        env:
+          AUTH_TEST_DATABASE_URL: postgres://ecom:ecom@localhost:5432/ecom_auth?sslmode=disable
+          CATALOG_TEST_DATABASE_URL: postgres://ecom:ecom@localhost:5432/ecom_catalog?sslmode=disable
+          ORDERS_TEST_DATABASE_URL: postgres://ecom:ecom@localhost:5432/ecom_orders?sslmode=disable
+          PAYMENT_TEST_DATABASE_URL: postgres://ecom:ecom@localhost:5432/ecom_payment?sslmode=disable
+          RATELIMITER_TEST_REDIS_ADDR: localhost:6379
+        run: |
+          set -e
+          # -race is not optional here. The properties this project claims —
+          # exactly-N through the rate limiter, no overselling, exactly one
+          # charge — are all concurrency properties, and the race detector is
+          # what catches the data races a passing assertion would miss.
+          for module in pkg ratelimiter gateway services/auth services/catalog services/orders services/payment; do
+            echo "==> testing $module"
+            (cd "$module" && go test -race -count=1 ./...)
+          done
+
+      - name: fail if integration tests were skipped
+        env:
+          AUTH_TEST_DATABASE_URL: postgres://ecom:ecom@localhost:5432/ecom_auth?sslmode=disable
+          CATALOG_TEST_DATABASE_URL: postgres://ecom:ecom@localhost:5432/ecom_catalog?sslmode=disable
+          ORDERS_TEST_DATABASE_URL: postgres://ecom:ecom@localhost:5432/ecom_orders?sslmode=disable
+          PAYMENT_TEST_DATABASE_URL: postgres://ecom:ecom@localhost:5432/ecom_payment?sslmode=disable
+          RATELIMITER_TEST_REDIS_ADDR: localhost:6379
+        # The suites skip rather than fail when a backend is missing, which is
+        # right for a developer without docker but wrong for CI: it would hide a
+        # misconfigured service container behind a green check. This re-runs the
+        # backend-dependent modules verbosely and rejects any SKIP.
+        run: |
+          set -e
+          skipped=0
+          for module in ratelimiter services/auth services/catalog services/orders services/payment; do
+            output=$(cd "$module" && go test -count=1 -v ./... 2>&1)
+            if echo "$output" | grep -q "^--- SKIP"; then
+              echo "::error::$module skipped tests — its backend was not reachable"
+              echo "$output" | grep "^--- SKIP" | sed 's/^/  /'
+              skipped=1
+            fi
+          done
+          if [ "$skipped" -eq 1 ]; then
+            echo "Integration tests skipped. CI must not pass without them."
+            exit 1
+          fi
+          echo "no integration tests were skipped"
+
+  build:
+    name: build all binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: "**/go.sum"
+
+      - name: build
+        # Each module is built in its own directory rather than through the
+        # workspace, which is also what a Docker build does in Phase 7 — so a
+        # missing `replace` directive fails here rather than at image build
+        # time.
+        run: |
+          set -e
+          for module in pkg ratelimiter gateway services/auth services/catalog services/orders services/payment; do
+            echo "==> building $module"
+            (cd "$module" && go build ./...)
+          done
