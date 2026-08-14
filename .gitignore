@@ -24,8 +24,13 @@ coverage.html
 # multi-module layout for free.
 go.work.sum
 
-# Secrets — .env.example is committed instead (see IMPLEMENTATION_PLAN.md
-# Phase 9).
+# Planning and agent-workflow documents. Deliberately kept out of the
+# repository, but retained locally as the working source of truth for the
+# remaining phases. Listed here so a `git add -A` cannot silently re-add them.
+AGENTS.md
+IMPLEMENTATION_PLAN.md
+
+# Secrets — .env.example is committed instead (see the local plan, Phase 9).
 .env
 .env.local
 *.pem
