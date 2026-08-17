@@ -73,5 +73,24 @@ services:
       retries: 20
       start_period: 20s
 
+  prometheus:
+    # Scrapes the RED metrics every service exposes (IMPLEMENTATION_PLAN.md
+    # Phase 6). Optional for the test suite, which asserts on /metrics directly,
+    # but it is what makes the Phase 7 load test legible.
+    image: prom/prometheus:v2.55.1
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    extra_hosts:
+      # Lets the container reach services running on the host with `go run`.
+      # Native on Docker Desktop; declared explicitly so it also works on Linux.
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
   postgres_data:

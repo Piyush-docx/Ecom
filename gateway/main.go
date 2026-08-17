@@ -21,11 +21,16 @@ import (
 
 	"gateway/middleware"
 	"gateway/router"
+	"pkg/logging"
+	"pkg/metrics"
 	rlredis "ratelimiter/redis"
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	// The correlation-aware logger from pkg/logging, not a bare slog handler:
+	// it reads the correlation ID off the context so every line carries it
+	// without each call site remembering to pass it.
+	logger := logging.New("gateway", logging.ParseLevel(os.Getenv("LOG_LEVEL")))
 	slog.SetDefault(logger)
 
 	if err := run(logger); err != nil {
@@ -73,7 +78,9 @@ func run(logger *slog.Logger) error {
 	}
 
 	handler, err := router.New(router.Config{
-		Limiter: limiter,
+		Limiter:   limiter,
+		Metrics:   metrics.New("gateway"),
+		Algorithm: "token_bucket",
 		JWT: middleware.JWTConfig{
 			Secret:   []byte(secret),
 			Issuer:   os.Getenv("JWT_ISSUER"),

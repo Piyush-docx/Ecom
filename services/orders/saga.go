@@ -8,6 +8,7 @@ import (
 
 	"pkg/correlation"
 	"pkg/events"
+	"pkg/metrics"
 )
 
 // SagaCoordinator is orders' side of the choreographed saga.
@@ -23,12 +24,21 @@ type SagaCoordinator struct {
 	store     *Store
 	catalog   *CatalogClient
 	publisher *events.Publisher
+	metrics   *metrics.Metrics
 	logger    *slog.Logger
 }
 
 // NewSagaCoordinator wires orders' event handling.
-func NewSagaCoordinator(store *Store, catalog *CatalogClient, publisher *events.Publisher, logger *slog.Logger) *SagaCoordinator {
-	return &SagaCoordinator{store: store, catalog: catalog, publisher: publisher, logger: logger}
+func NewSagaCoordinator(store *Store, catalog *CatalogClient, publisher *events.Publisher, m *metrics.Metrics, logger *slog.Logger) *SagaCoordinator {
+	return &SagaCoordinator{store: store, catalog: catalog, publisher: publisher, metrics: m, logger: logger}
+}
+
+// record is a nil-safe metrics helper, since tests construct the coordinator
+// without metrics.
+func (s *SagaCoordinator) record(fn func(*metrics.Metrics)) {
+	if s.metrics != nil {
+		fn(s.metrics)
+	}
 }
 
 // PublishOrderCreated announces a new pending order, starting the saga.
@@ -54,7 +64,13 @@ func (s *SagaCoordinator) PublishOrderCreated(ctx context.Context, order *Order)
 		return fmt.Errorf("building OrderCreated: %w", err)
 	}
 
-	return s.publisher.Publish(ctx, events.TopicOrderCreated, order.ID, env)
+	if err := s.publisher.Publish(ctx, events.TopicOrderCreated, order.ID, env); err != nil {
+		return err
+	}
+	s.record(func(m *metrics.Metrics) {
+		m.RecordEventPublished(events.TopicOrderCreated, events.TypeOrderCreated)
+	})
+	return nil
 }
 
 // HandlePaymentSucceeded confirms an order and consumes its reserved stock.
@@ -111,6 +127,10 @@ func (s *SagaCoordinator) HandlePaymentSucceeded(ctx context.Context, env *event
 
 	s.logger.InfoContext(ctx, "order confirmed by saga",
 		"order_id", updated.ID, "payment_id", payload.PaymentID)
+	s.record(func(m *metrics.Metrics) {
+		m.RecordEventConsumed(events.TopicPaymentSucceeded, events.TypePaymentSucceeded, "success")
+		m.RecordSagaOutcome("confirmed")
+	})
 	return nil
 }
 
@@ -168,6 +188,9 @@ func (s *SagaCoordinator) HandlePaymentFailed(ctx context.Context, env *events.E
 		if err := s.catalog.Release(ctx, order.ID, item.ProductID); err != nil {
 			s.logger.ErrorContext(ctx, "compensation failed, order stays pending for retry",
 				"error", err, "order_id", order.ID, "product_id", item.ProductID)
+			s.record(func(m *metrics.Metrics) {
+				m.RecordEventConsumed(events.TopicPaymentFailed, events.TypePaymentFailed, "retry")
+			})
 			return fmt.Errorf("releasing reservation for product %s: %w", item.ProductID, err)
 		}
 	}
@@ -189,5 +212,9 @@ func (s *SagaCoordinator) HandlePaymentFailed(ctx context.Context, env *events.E
 
 	s.logger.InfoContext(ctx, "order cancelled and inventory released by saga",
 		"order_id", updated.ID, "reason", reason)
+	s.record(func(m *metrics.Metrics) {
+		m.RecordEventConsumed(events.TopicPaymentFailed, events.TypePaymentFailed, "success")
+		m.RecordSagaOutcome("compensated")
+	})
 	return nil
 }

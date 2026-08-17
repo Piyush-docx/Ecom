@@ -19,6 +19,7 @@ import (
 	"pkg/dbx"
 	"pkg/events"
 	"pkg/logging"
+	"pkg/metrics"
 )
 
 //go:embed migrations/*.sql
@@ -53,6 +54,8 @@ func run(logger *slog.Logger) error {
 	store := NewStore(pool)
 	catalog := NewCatalogClient(env("CATALOG_SERVICE_URL", "http://localhost:8082"))
 
+	m := metrics.New("orders")
+
 	brokers := strings.Split(env("KAFKA_BROKERS", "localhost:9092"), ",")
 
 	// Create the saga's topics before producing or consuming. Auto-creation
@@ -70,12 +73,13 @@ func run(logger *slog.Logger) error {
 	publisher := events.NewPublisher(brokers, logger)
 	defer publisher.Close()
 
-	saga := NewSagaCoordinator(store, catalog, publisher, logger)
+	saga := NewSagaCoordinator(store, catalog, publisher, m, logger)
 
 	api := &API{
 		store:   store,
 		catalog: catalog,
 		saga:    saga,
+		metrics: m,
 		logger:  logger,
 	}
 

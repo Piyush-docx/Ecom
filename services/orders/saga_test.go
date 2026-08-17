@@ -46,7 +46,7 @@ func newSagaTestAPI(t *testing.T) (*API, *stubCatalog) {
 	publisher := events.NewPublisher(brokers, logger)
 	t.Cleanup(func() { _ = publisher.Close() })
 
-	api.saga = NewSagaCoordinator(api.store, api.catalog, publisher, logger)
+	api.saga = NewSagaCoordinator(api.store, api.catalog, publisher, nil, logger)
 	return api, catalog
 }
 

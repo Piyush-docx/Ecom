@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"gateway/middleware"
+	"pkg/metrics"
 	"ratelimiter"
 )
 
@@ -32,6 +33,13 @@ type Config struct {
 
 	// Logger defaults to slog.Default().
 	Logger *slog.Logger
+
+	// Metrics, when set, exposes /metrics and records RED plus rate-limiter
+	// metrics.
+	Metrics *metrics.Metrics
+
+	// Algorithm labels the rate-limiter metrics.
+	Algorithm string
 }
 
 // New builds the gateway's HTTP handler.
@@ -72,9 +80,11 @@ func New(cfg Config) (http.Handler, error) {
 	}
 
 	rateLimit := middleware.RateLimit(middleware.RateLimitConfig{
-		Limiter:  cfg.Limiter,
-		FailOpen: cfg.FailOpen,
-		Logger:   logger,
+		Limiter:   cfg.Limiter,
+		FailOpen:  cfg.FailOpen,
+		Logger:    logger,
+		Metrics:   cfg.Metrics,
+		Algorithm: cfg.Algorithm,
 	})
 
 	r := chi.NewRouter()
@@ -82,6 +92,20 @@ func New(cfg Config) (http.Handler, error) {
 	// Runs before everything: a client must not be able to assert identity.
 	r.Use(stripUntrustedHeaders)
 	r.Use(middleware.CorrelationIDMiddleware)
+
+	// One structured line per completed request, inside correlation so the ID
+	// is on the context. Without it the gateway is invisible in a trace, and a
+	// request it rejects outright leaves no record at all.
+	r.Use(middleware.AccessLog(logger))
+
+	// Metrics run after correlation so a recorded failure is attributable, and
+	// before the route groups so every request is measured -- including the
+	// ones rejected by auth or the rate limiter, which are exactly the requests
+	// an operator needs counted.
+	if cfg.Metrics != nil {
+		r.Use(cfg.Metrics.Middleware(metrics.ChiRoute))
+		r.Handle("/metrics", cfg.Metrics.Handler())
+	}
 
 	// Health checks are deliberately outside the rate limiter and auth. A
 	// load balancer polling health must not consume anyone's quota, and must

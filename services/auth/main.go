@@ -17,6 +17,7 @@ import (
 
 	"pkg/dbx"
 	"pkg/logging"
+	"pkg/metrics"
 )
 
 // Migrations are embedded so the binary carries the schema it expects, rather
@@ -72,6 +73,7 @@ func run(logger *slog.Logger) error {
 
 	api := &API{
 		store:      NewStore(pool),
+		metrics:    metrics.New("auth"),
 		logger:     logger,
 		jwtSecret:  []byte(secret),
 		jwtTTL:     ttl,

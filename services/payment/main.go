@@ -20,6 +20,7 @@ import (
 	"pkg/dbx"
 	"pkg/events"
 	"pkg/logging"
+	"pkg/metrics"
 )
 
 //go:embed migrations/*.sql
@@ -66,6 +67,8 @@ func run(logger *slog.Logger) error {
 	store := NewStore(pool)
 	gateway := StubGateway{FailAmountCents: failAmount}
 
+	m := metrics.New("payment")
+
 	brokers := strings.Split(env("KAFKA_BROKERS", "localhost:9092"), ",")
 	if err := events.EnsureTopics(ctx, brokers, events.SagaTopics, events.DefaultPartitions, 1); err != nil {
 		return fmt.Errorf("creating kafka topics: %w", err)
@@ -78,7 +81,7 @@ func run(logger *slog.Logger) error {
 	publisher := events.NewPublisher(brokers, logger)
 	defer publisher.Close()
 
-	saga := NewSagaConsumer(store, gateway, publisher, logger)
+	saga := NewSagaConsumer(store, gateway, publisher, m, logger)
 
 	// Consume OrderCreated. The group is payment-specific, so payment and
 	// orders each see every message on their respective topics.
@@ -96,6 +99,7 @@ func run(logger *slog.Logger) error {
 	api := &API{
 		store:   store,
 		gateway: gateway,
+		metrics: m,
 		logger:  logger,
 	}
 

@@ -63,7 +63,7 @@ func newSagaFixture(t *testing.T, gateway Gateway) (*SagaConsumer, *events.Publi
 	// The consumer publishes outcomes to the real topic names, so a test that
 	// wants to observe them subscribes there. Overriding is not worth the
 	// indirection: what matters here is the charge, which the database records.
-	saga := NewSagaConsumer(api.store, gateway, publisher, logger)
+	saga := NewSagaConsumer(api.store, gateway, publisher, nil, logger)
 
 	return saga, publisher
 }

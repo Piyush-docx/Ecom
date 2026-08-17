@@ -13,6 +13,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
+
+	"pkg/correlation"
 )
 
 // CorrelationIDHeader carries the correlation ID between the client, the
@@ -70,7 +72,12 @@ func CorrelationIDMiddleware(next http.Handler) http.Handler {
 		// which request was refused.
 		w.Header().Set(CorrelationIDHeader, id)
 
+		// Stored under both this package's key and pkg/correlation's, because
+		// pkg/logging reads the latter to stamp every log line. Without the
+		// bridge the gateway's own logs would omit the ID that its downstream
+		// services all carry.
 		ctx := ContextWithCorrelationID(r.Context(), id)
+		ctx = correlation.NewContext(ctx, id)
 		// Set it on the outbound request too, so the reverse proxy forwards it
 		// downstream without needing to read the context.
 		r.Header.Set(CorrelationIDHeader, id)

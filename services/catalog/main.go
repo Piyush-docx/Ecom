@@ -14,6 +14,7 @@ import (
 
 	"pkg/dbx"
 	"pkg/logging"
+	"pkg/metrics"
 )
 
 //go:embed migrations/*.sql
@@ -45,7 +46,7 @@ func run(logger *slog.Logger) error {
 	}
 	logger.Info("migrations applied")
 
-	api := &API{store: NewStore(pool), logger: logger}
+	api := &API{store: NewStore(pool), metrics: metrics.New("catalog"), logger: logger}
 
 	srv := &http.Server{
 		Addr:              addr,

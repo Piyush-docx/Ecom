@@ -8,6 +8,7 @@ import (
 
 	"pkg/correlation"
 	"pkg/events"
+	"pkg/metrics"
 )
 
 // SagaConsumer is payment's side of the choreographed saga: it consumes
@@ -20,12 +21,21 @@ type SagaConsumer struct {
 	store     *Store
 	gateway   Gateway
 	publisher *events.Publisher
+	metrics   *metrics.Metrics
 	logger    *slog.Logger
 }
 
 // NewSagaConsumer wires payment's event handling.
-func NewSagaConsumer(store *Store, gateway Gateway, publisher *events.Publisher, logger *slog.Logger) *SagaConsumer {
-	return &SagaConsumer{store: store, gateway: gateway, publisher: publisher, logger: logger}
+func NewSagaConsumer(store *Store, gateway Gateway, publisher *events.Publisher, m *metrics.Metrics, logger *slog.Logger) *SagaConsumer {
+	return &SagaConsumer{store: store, gateway: gateway, publisher: publisher, metrics: m, logger: logger}
+}
+
+// record is a nil-safe metrics helper, since tests construct the consumer
+// without metrics.
+func (s *SagaConsumer) record(fn func(*metrics.Metrics)) {
+	if s.metrics != nil {
+		fn(s.metrics)
+	}
 }
 
 // HandleOrderCreated charges for an order and publishes the result.
@@ -97,6 +107,9 @@ func (s *SagaConsumer) HandleOrderCreated(ctx context.Context, env *events.Envel
 
 	s.logger.InfoContext(ctx, "charge attempted via saga",
 		"order_id", payment.OrderID, "status", payment.Status, "amount_cents", payment.AmountCents)
+	s.record(func(m *metrics.Metrics) {
+		m.RecordEventConsumed(events.TopicOrderCreated, events.TypeOrderCreated, "success")
+	})
 
 	return s.publishOutcome(ctx, payment)
 }
@@ -123,7 +136,13 @@ func (s *SagaConsumer) publishOutcome(ctx context.Context, payment *Payment) err
 		}
 		// Keyed by order ID so every event about one order shares a partition
 		// and stays ordered.
-		return s.publisher.Publish(ctx, events.TopicPaymentSucceeded, payment.OrderID, env)
+		if err := s.publisher.Publish(ctx, events.TopicPaymentSucceeded, payment.OrderID, env); err != nil {
+			return err
+		}
+		s.record(func(m *metrics.Metrics) {
+			m.RecordEventPublished(events.TopicPaymentSucceeded, events.TypePaymentSucceeded)
+		})
+		return nil
 	}
 
 	env, err := events.NewEnvelope(newUUID(), events.TypePaymentFailed, correlationID,
@@ -134,5 +153,11 @@ func (s *SagaConsumer) publishOutcome(ctx context.Context, payment *Payment) err
 	if err != nil {
 		return fmt.Errorf("building PaymentFailed: %w", err)
 	}
-	return s.publisher.Publish(ctx, events.TopicPaymentFailed, payment.OrderID, env)
+	if err := s.publisher.Publish(ctx, events.TopicPaymentFailed, payment.OrderID, env); err != nil {
+		return err
+	}
+	s.record(func(m *metrics.Metrics) {
+		m.RecordEventPublished(events.TopicPaymentFailed, events.TypePaymentFailed)
+	})
+	return nil
 }

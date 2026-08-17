@@ -1,0 +1,54 @@
+Phase 6 acceptance evidence — observability
+Generated: 2026-08-17 18:08:41 UTC
+Go: go version go1.26.5 darwin/arm64
+
+ACCEPTANCE CRITERION (IMPLEMENTATION_PLAN.md Phase 6):
+  'given only the correlation ID from one order request, you can
+   grep/query logs across all four services and see the full lifecycle
+   of that one request.'
+
+=== LIVE DEMONSTRATION: one checkout through the running stack ===
+  correlation id: trace-1786989689-checkout
+
+  Reconstructed by filtering all service logs on that one id:
+    23:31:29.713  catalog   stock reserved
+    23:31:29.728  orders    order created
+    23:31:30.758  orders    event published
+    23:31:30.765  payment   event received
+    23:31:30.779  payment   charge attempted via saga
+    23:31:31.796  payment   event published
+    23:31:31.797  orders    event received
+    23:31:31.804  catalog   stock committed
+    23:31:31.814  orders    order confirmed by saga
+
+  The trace crosses three services and the Kafka boundary:
+  reserve -> order created -> OrderCreated published -> payment consumes
+  -> charge -> PaymentSucceeded published -> orders consumes -> confirmed.
+  This is the distributed-debugging capability the criterion asks for.
+
+=== the same property, asserted in the test suite (runs in CI) ===
+--- PASS: TestCorrelationIDIsStampedAutomatically (0.00s)
+--- PASS: TestCorrelationSurvivesWithAttrsAndGroup (0.00s)
+--- PASS: TestOneCorrelationIDSpansEveryService (0.00s)
+ok  	pkg/logging	0.243s
+
+=== RED metrics + rate-limiter and saga instrumentation ===
+--- PASS: TestREDMetricsAreRecorded (0.00s)
+--- PASS: TestClientErrorsAreNotServiceErrors (0.00s)
+--- PASS: TestRouteLabelIsThePatternNotThePath (0.00s)
+--- PASS: TestMetricsEndpointIsNotMeasured (0.00s)
+--- PASS: TestHandlerExposesMetrics (0.00s)
+--- PASS: TestRateLimitMetrics (0.00s)
+--- PASS: TestSagaMetrics (0.00s)
+--- PASS: TestStatusRecorderDefaultsTo200 (0.00s)
+ok  	pkg/metrics	0.306s
+
+=== metrics guards verified by mutation ===
+  route label leaks concrete path  -> TestRouteLabelIsThePatternNotThePath fails
+     (1000 distinct paths produced 50 series instead of 1)
+  4xx counted as service errors    -> TestClientErrorsAreNotServiceErrors fails
+  /metrics measured by itself      -> TestMetricsEndpointIsNotMeasured fails
+
+  Cardinality is the one that matters most: labelling by concrete path
+  lets a client with unique IDs create unbounded time series and take
+  down the monitoring that is supposed to explain the outage.

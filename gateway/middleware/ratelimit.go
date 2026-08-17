@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"pkg/metrics"
 	"ratelimiter"
 )
 
@@ -89,6 +90,14 @@ type RateLimitConfig struct {
 
 	// Logger records limiter failures. Defaults to slog.Default().
 	Logger *slog.Logger
+
+	// Metrics, when set, records allowed/denied counts and the remaining
+	// allowance. Optional so tests can construct the middleware without it.
+	Metrics *metrics.Metrics
+
+	// Algorithm labels the metrics, so a deployment that switches algorithms
+	// can be compared against its predecessor.
+	Algorithm string
 }
 
 // RateLimit enforces the limiter and sets rate-limit headers on every response,
@@ -104,6 +113,10 @@ func RateLimit(cfg RateLimitConfig) func(http.Handler) http.Handler {
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.Default()
+	}
+	algorithm := cfg.Algorithm
+	if algorithm == "" {
+		algorithm = "unknown"
 	}
 
 	return func(next http.Handler) http.Handler {
@@ -127,6 +140,10 @@ func RateLimit(cfg RateLimitConfig) func(http.Handler) http.Handler {
 				}
 				next.ServeHTTP(w, r)
 				return
+			}
+
+			if cfg.Metrics != nil {
+				cfg.Metrics.RecordRateLimitDecision(algorithm, res.Allowed, res.Remaining)
 			}
 
 			setRateLimitHeaders(w, res)

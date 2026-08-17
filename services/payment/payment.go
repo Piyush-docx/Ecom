@@ -18,6 +18,7 @@ import (
 
 	"pkg/correlation"
 	"pkg/httpx"
+	"pkg/metrics"
 )
 
 // Charge statuses.
@@ -143,6 +144,7 @@ func (g StubGateway) Charge(_ context.Context, _ string, amountCents int64, _ st
 type API struct {
 	store   *Store
 	gateway Gateway
+	metrics *metrics.Metrics
 	logger  *slog.Logger
 }
 
@@ -150,6 +152,14 @@ type API struct {
 func (a *API) Routes() http.Handler {
 	r := chi.NewRouter()
 	r.Use(correlation.Middleware)
+
+	// Metrics middleware runs inside correlation so a failure it records is
+	// attributable, and after routing so ChiRoute can read the matched pattern
+	// rather than the concrete path.
+	if a.metrics != nil {
+		r.Use(a.metrics.Middleware(metrics.ChiRoute))
+		r.Handle("/metrics", a.metrics.Handler())
+	}
 
 	r.Get("/healthz", a.health)
 
