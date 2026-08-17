@@ -19,6 +19,7 @@ import (
 type API struct {
 	store   *Store
 	catalog *CatalogClient
+	saga    *SagaCoordinator
 	logger  *slog.Logger
 }
 
@@ -200,6 +201,25 @@ func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
 
 	a.logger.InfoContext(r.Context(), "order created",
 		"order_id", order.ID, "user_id", userID, "total_cents", total)
+
+	// Start the saga. Publishing after the order row exists and its stock is
+	// held means payment can never charge for an order the database failed to
+	// record.
+	//
+	// A publish failure is reported as 502 rather than swallowed: the order
+	// exists and holds stock, but nothing will ever charge for it, so the
+	// client must know its checkout did not complete. The order stays pending
+	// and its reservation stays held, which is visible to an operator -- the
+	// same tradeoff the compensation path makes, for the same reason.
+	if a.saga != nil {
+		if err := a.saga.PublishOrderCreated(r.Context(), order); err != nil {
+			a.logger.ErrorContext(r.Context(), "publishing OrderCreated failed; the order will not progress",
+				"error", err, "order_id", order.ID)
+			httpx.WriteError(w, r, http.StatusBadGateway, "order created but could not be submitted for payment")
+			return
+		}
+	}
+
 	httpx.WriteJSON(w, r, http.StatusCreated, toView(order))
 }
 

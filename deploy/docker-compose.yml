@@ -31,5 +31,47 @@ services:
       timeout: 3s
       retries: 15
 
+  kafka:
+    # KRaft mode: no ZooKeeper. One container instead of two, and ZooKeeper is
+    # removed entirely in Kafka 4.x, so this is the configuration that will
+    # still be correct later.
+    image: confluentinc/cp-kafka:7.7.1
+    ports:
+      - "9092:9092"
+    environment:
+      # Single-node cluster acting as both broker and controller.
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9092
+      # Two advertised listeners because clients reach the broker from two
+      # different networks: other containers use kafka:29092, while tests and
+      # services on the host use localhost:9092. A single listener would work
+      # for one and break the other.
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # Replication cannot exceed the single broker.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # No consumer rebalance delay: with one consumer per group, waiting three
+      # seconds on every startup only slows the test suite down.
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Auto-creation keeps local runs simple. Phase 7 should create topics
+      # explicitly with a chosen partition count, since partitioning is what
+      # gives per-order event ordering.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    healthcheck:
+      # Listing topics proves the broker is actually serving metadata, which a
+      # port check does not: Kafka accepts connections well before it is ready.
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
+
 volumes:
   postgres_data:

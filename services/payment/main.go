@@ -7,15 +7,18 @@ import (
 	"context"
 	"embed"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"pkg/dbx"
+	"pkg/events"
 	"pkg/logging"
 )
 
@@ -60,9 +63,39 @@ func run(logger *slog.Logger) error {
 		failAmount = n
 	}
 
+	store := NewStore(pool)
+	gateway := StubGateway{FailAmountCents: failAmount}
+
+	brokers := strings.Split(env("KAFKA_BROKERS", "localhost:9092"), ",")
+	if err := events.EnsureTopics(ctx, brokers, events.SagaTopics, events.DefaultPartitions, 1); err != nil {
+		return fmt.Errorf("creating kafka topics: %w", err)
+	}
+	if err := events.WaitForTopics(ctx, brokers, events.SagaTopics, 30*time.Second); err != nil {
+		return fmt.Errorf("waiting for kafka topics: %w", err)
+	}
+	logger.Info("kafka topics ready", "brokers", brokers)
+
+	publisher := events.NewPublisher(brokers, logger)
+	defer publisher.Close()
+
+	saga := NewSagaConsumer(store, gateway, publisher, logger)
+
+	// Consume OrderCreated. The group is payment-specific, so payment and
+	// orders each see every message on their respective topics.
+	consumerCtx, stopConsumer := context.WithCancel(context.Background())
+	defer stopConsumer()
+
+	go func() {
+		c := events.NewConsumer(brokers, events.TopicOrderCreated, "payment-service",
+			saga.HandleOrderCreated, logger)
+		if err := c.Run(consumerCtx); err != nil {
+			logger.Error("consumer stopped with an error", "error", err)
+		}
+	}()
+
 	api := &API{
-		store:   NewStore(pool),
-		gateway: StubGateway{FailAmountCents: failAmount},
+		store:   store,
+		gateway: gateway,
 		logger:  logger,
 	}
 

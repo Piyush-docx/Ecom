@@ -55,12 +55,11 @@ jobs:
           done
 
   test:
-    name: test against real Postgres and Redis
+    name: test against real Postgres, Redis, and Kafka
     runs-on: ubuntu-latest
 
     services:
-      # The plan (§6) is explicit that the DB and Redis layers must not be
-      # mocked: a rate limiter test against a mocked Redis proves nothing about
+      # The plan (§6) is explicit that these layers must not be mocked: a rate limiter test against a mocked Redis proves nothing about
       # the atomicity claim, and a mocked Postgres would not exercise the unique
       # indexes and CHECK constraints that prevent overselling and duplicate
       # charges. These are the real thing.
@@ -91,6 +90,38 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+
+      kafka:
+        # KRaft mode, matching deploy/docker-compose.yml. The saga tests need a
+        # real broker: at-least-once redelivery is the behaviour under test, and
+        # a fake that delivers each message once would verify the opposite.
+        image: confluentinc/cp-kafka:7.7.1
+        ports:
+          - 9092:9092
+        env:
+          KAFKA_NODE_ID: 1
+          KAFKA_PROCESS_ROLES: broker,controller
+          KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:29093
+          KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:29093
+          # Only one advertised listener here, unlike compose: the job runs on
+          # the runner and reaches the broker through the mapped port, so
+          # localhost:9092 is the single address that has to work.
+          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+          KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+          KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+          KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+          KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+          KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+          KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+          CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+        options: >-
+          --health-cmd "kafka-topics --bootstrap-server localhost:9092 --list || exit 1"
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 20
+          --health-start-period 30s
 
     steps:
       - uses: actions/checkout@v4
@@ -137,6 +168,22 @@ jobs:
             *) echo "redis did not answer PING (got: ${reply:-<nothing>})"; exit 1 ;;
           esac
 
+          # Kafka speaks a binary protocol, so there is no cheap text probe like
+          # PING. A successful TCP connect is what the Go client needs and is
+          # what the service healthcheck already gates on.
+          for attempt in $(seq 1 30); do
+            if exec 3<>/dev/tcp/localhost/9092 2>/dev/null; then
+              exec 3<&-
+              echo "kafka reachable"
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "kafka never became reachable on localhost:9092"
+              exit 1
+            fi
+            sleep 2
+          done
+
       - name: test
         env:
           AUTH_TEST_DATABASE_URL: postgres://ecom:ecom@localhost:5432/ecom_auth?sslmode=disable
@@ -144,6 +191,7 @@ jobs:
           ORDERS_TEST_DATABASE_URL: postgres://ecom:ecom@localhost:5432/ecom_orders?sslmode=disable
           PAYMENT_TEST_DATABASE_URL: postgres://ecom:ecom@localhost:5432/ecom_payment?sslmode=disable
           RATELIMITER_TEST_REDIS_ADDR: localhost:6379
+          KAFKA_TEST_BROKERS: localhost:9092
         run: |
           set -e
           # -race is not optional here. The properties this project claims —
@@ -162,6 +210,7 @@ jobs:
           ORDERS_TEST_DATABASE_URL: postgres://ecom:ecom@localhost:5432/ecom_orders?sslmode=disable
           PAYMENT_TEST_DATABASE_URL: postgres://ecom:ecom@localhost:5432/ecom_payment?sslmode=disable
           RATELIMITER_TEST_REDIS_ADDR: localhost:6379
+          KAFKA_TEST_BROKERS: localhost:9092
         # The suites skip rather than fail when a backend is missing, which is
         # right for a developer without docker but wrong for CI: it would hide a
         # misconfigured service container behind a green check. This re-runs the

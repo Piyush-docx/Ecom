@@ -1,0 +1,64 @@
+Phase 5 acceptance evidence — choreographed saga (orders ⇄ payment)
+Generated: 2026-08-17 16:37:55 UTC
+Go: go version go1.26.5 darwin/arm64
+Kafka: 7.7.1-ccs
+
+ACCEPTANCE CRITERIA (IMPLEMENTATION_PLAN.md Phase 5):
+  1. 'a test that publishes OrderCreated twice with the same order ID
+      must result in exactly one charge attempt.'
+  2. 'a test that forces PaymentFailed must leave the system in a fully
+      compensated state (no orphaned inventory reservation, order marked
+      cancelled, not stuck pending).'
+
+=== saga topics ===
+  order.created
+  payment.failed
+  payment.succeeded
+
+=== CRITERION 1: duplicate OrderCreated -> exactly one charge ===
+    saga_test.go:126: two deliveries of OrderCreated for order 13ecc7c2 produced exactly 1 charge
+--- PASS: TestDuplicateOrderCreatedChargesExactlyOnce (2.11s)
+--- PASS: TestManyDuplicateDeliveriesChargeOnce (10.14s)
+    saga_test.go:181: 5 deliveries of OrderCreated resulted in exactly 1 call to the payment processor
+--- PASS: TestChargeCountingGateway (5.07s)
+--- PASS: TestFailedChargeIsAlsoIdempotent (3.08s)
+
+=== CRITERION 2: forced PaymentFailed -> fully compensated ===
+    saga_test.go:143: compensated: order 1833a62b is cancelled (card declined), reservation released
+--- PASS: TestPaymentFailedLeavesFullyCompensatedState (1.08s)
+--- PASS: TestPaymentSucceededConfirmsAndConsumesStock (1.05s)
+--- PASS: TestCompensationIsIdempotent (1.05s)
+    saga_test.go:301: compensation failure: order held pending, retried after recovery, then cancelled
+--- PASS: TestCompensationFailureLeavesOrderPendingForRetry (1.05s)
+
+=== out-of-order and unknown-order events ===
+--- PASS: TestLateEventCannotFlipASettledOrder (2.10s)
+    --- PASS: TestLateEventCannotFlipASettledOrder/a_late_PaymentFailed_cannot_cancel_a_confirmed_order (1.04s)
+    --- PASS: TestLateEventCannotFlipASettledOrder/a_late_PaymentSucceeded_cannot_confirm_a_cancelled_order (1.02s)
+--- PASS: TestEventForUnknownOrderIsSkipped (0.04s)
+    saga_test.go:362: OrderCreated observed on the topic for order 0c97e8f9
+--- PASS: TestOrderCreatedIsPublishedOnCheckout (1.06s)
+
+=== FULL SUITE (-race) ===
+  pkg                    ?   	pkg/logging	[no test files]
+  ratelimiter            ok  	ratelimiter/redis	14.886s
+  gateway                ok  	gateway/router	1.345s
+  services/auth          ok  	services/auth	2.033s
+  services/catalog       ok  	services/catalog	1.918s
+  services/orders        ok  	services/orders	9.513s
+  services/payment       ok  	services/payment	22.424s
+
+=== PLAN §5: what happens if the compensating action itself fails ===
+  Decision: the order stays 'pending' and the event is redelivered.
+  The release is attempted BEFORE the status change, so a failed release
+  leaves the order pending and the retry alive. Cancelling first would
+  leave stock held for a terminal order that nothing ever revisits —
+  silently unsellable inventory.
+
+  Verified by mutation: reordering compensation to cancel-then-release
+  fails TestCompensationFailureLeavesOrderPendingForRetry with
+  'compensation reported success while the release failed'.
+
+  Known gap: a permanently failing catalog retries indefinitely. A
+  dead-letter topic and an alert after N attempts is the production
+  answer, recorded for the Phase 8 ADR.

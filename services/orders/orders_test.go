@@ -48,10 +48,13 @@ type stubCatalog struct {
 	prices map[string]int64
 	// products whose reservation should fail with 409.
 	outOfStock map[string]bool
-	// records what was reserved and released, so a test can assert that a
-	// failed order left no stock held.
-	reserved map[string]int
-	released map[string]int
+	// records what was reserved, released and committed, so a test can assert
+	// that a failed order left no stock held.
+	reserved  map[string]int
+	released  map[string]int
+	committed map[string]int
+	// releasesFail simulates a catalog outage during compensation.
+	releasesFail bool
 }
 
 func newStubCatalog(t *testing.T) *stubCatalog {
@@ -62,6 +65,7 @@ func newStubCatalog(t *testing.T) *stubCatalog {
 		outOfStock: map[string]bool{},
 		reserved:   map[string]int{},
 		released:   map[string]int{},
+		committed:  map[string]int{},
 	}
 
 	mux := http.NewServeMux()
@@ -111,7 +115,24 @@ func newStubCatalog(t *testing.T) *stubCatalog {
 
 		s.mu.Lock()
 		defer s.mu.Unlock()
+		if s.releasesFail {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		s.released[req.ProductID]++
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	})
+
+	mux.HandleFunc("POST /catalog/reservations/commit", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ProductID string `json:"product_id"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.committed[req.ProductID]++
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{}`))
 	})

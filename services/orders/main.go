@@ -7,14 +7,17 @@ import (
 	"context"
 	"embed"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"pkg/dbx"
+	"pkg/events"
 	"pkg/logging"
 )
 
@@ -47,10 +50,52 @@ func run(logger *slog.Logger) error {
 	}
 	logger.Info("migrations applied")
 
+	store := NewStore(pool)
+	catalog := NewCatalogClient(env("CATALOG_SERVICE_URL", "http://localhost:8082"))
+
+	brokers := strings.Split(env("KAFKA_BROKERS", "localhost:9092"), ",")
+
+	// Create the saga's topics before producing or consuming. Auto-creation
+	// races the first produce, which fails with "Unknown Topic Or Partition"
+	// while metadata propagates -- so the very first order of a cold start
+	// would be lost.
+	if err := events.EnsureTopics(ctx, brokers, events.SagaTopics, events.DefaultPartitions, 1); err != nil {
+		return fmt.Errorf("creating kafka topics: %w", err)
+	}
+	if err := events.WaitForTopics(ctx, brokers, events.SagaTopics, 30*time.Second); err != nil {
+		return fmt.Errorf("waiting for kafka topics: %w", err)
+	}
+	logger.Info("kafka topics ready", "brokers", brokers)
+
+	publisher := events.NewPublisher(brokers, logger)
+	defer publisher.Close()
+
+	saga := NewSagaCoordinator(store, catalog, publisher, logger)
+
 	api := &API{
-		store:   NewStore(pool),
-		catalog: NewCatalogClient(env("CATALOG_SERVICE_URL", "http://localhost:8082")),
+		store:   store,
+		catalog: catalog,
+		saga:    saga,
 		logger:  logger,
+	}
+
+	// Consume payment outcomes. Both consumers share this service's group, so
+	// each message is handled once across however many instances run.
+	consumerCtx, stopConsumers := context.WithCancel(context.Background())
+	defer stopConsumers()
+
+	consumers := []*events.Consumer{
+		events.NewConsumer(brokers, events.TopicPaymentSucceeded, "orders-service",
+			saga.HandlePaymentSucceeded, logger),
+		events.NewConsumer(brokers, events.TopicPaymentFailed, "orders-service",
+			saga.HandlePaymentFailed, logger),
+	}
+	for _, c := range consumers {
+		go func(c *events.Consumer) {
+			if err := c.Run(consumerCtx); err != nil {
+				logger.Error("consumer stopped with an error", "error", err)
+			}
+		}(c)
 	}
 
 	srv := &http.Server{
