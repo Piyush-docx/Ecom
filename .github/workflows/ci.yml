@@ -122,8 +122,20 @@ jobs:
           set -e
           PGPASSWORD=ecom psql -h localhost -U ecom -d ecom -c "SELECT version();" > /dev/null
           echo "postgres reachable"
-          redis-cli -h localhost ping
-          echo "redis reachable"
+
+          # Reached over TCP rather than with redis-cli: the runner image ships
+          # a PostgreSQL client but no redis-tools, so redis-cli does not exist
+          # here. Bash's /dev/tcp speaks enough of the protocol to send PING and
+          # read +PONG, which is what needs proving — that the mapped port
+          # answers from the runner, exactly as the Go tests will reach it.
+          exec 3<>/dev/tcp/localhost/6379
+          printf 'PING\r\n' >&3
+          read -r -t 5 reply <&3
+          exec 3<&-
+          case "$reply" in
+            +PONG*) echo "redis reachable" ;;
+            *) echo "redis did not answer PING (got: ${reply:-<nothing>})"; exit 1 ;;
+          esac
 
       - name: test
         env:
