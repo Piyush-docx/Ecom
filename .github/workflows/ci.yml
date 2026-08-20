@@ -244,13 +244,18 @@ jobs:
           cache-dependency-path: "**/go.sum"
 
       - name: build
-        # Each module is built in its own directory rather than through the
-        # workspace, which is also what a Docker build does in Phase 7 — so a
-        # missing `replace` directive fails here rather than at image build
-        # time.
+        # GOWORK=off is the whole point of this step. go.work is committed, so
+        # `cd $module && go build` still resolves sibling modules through the
+        # workspace and a module missing a `replace` directive builds fine here
+        # while failing in Docker, which has no workspace. That is not
+        # hypothetical: gateway/go.mod imported pkg/... without requiring or
+        # replacing `pkg` at all, this job passed, and the bug surfaced only at
+        # image build time in Phase 7.
+        env:
+          GOWORK: "off"
         run: |
           set -e
           for module in pkg ratelimiter gateway services/auth services/catalog services/orders services/payment; do
-            echo "==> building $module"
+            echo "==> building $module (GOWORK=off)"
             (cd "$module" && go build ./...)
           done

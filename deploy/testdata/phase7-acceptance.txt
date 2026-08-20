@@ -157,3 +157,36 @@ Final state, every module with -race against live backends:
 This is exactly the failure the CI skip-guard exists to catch, and it is worth
 remembering that "ok" from `go test` means "nothing failed", not "something
 ran". The two stacks cannot both be up: they bind the same host ports.
+
+
+Addendum 2: closing the CI gap that let the gateway bug through
+---------------------------------------------------------------
+The gateway/go.mod bug should not have reached an image build. The CI build
+job already claimed to prevent it:
+
+  # Each module is built in its own directory rather than through the
+  # workspace, which is also what a Docker build does in Phase 7 -- so a
+  # missing `replace` directive fails here rather than at image build time.
+
+It could not. go.work is committed and the job never set GOWORK, so
+`cd $module && go build ./...` still resolved sibling modules through the
+workspace. Building from the module directory is not the same as building
+without the workspace.
+
+Demonstrated on a scratch copy of the repo with `pkg` stripped from
+gateway/go.mod entirely (no require, no replace):
+
+  cd gateway && go build ./...              exit 0      <- CI, catches nothing
+  cd gateway && GOWORK=off go build ./...   3 errors    <- the Docker failure
+
+The three errors are exactly the ones that broke the Phase 7 image build:
+package pkg/correlation, pkg/metrics and pkg/logging "is not in std".
+
+Fix: the build job now sets GOWORK=off. Verified in both directions rather
+than assumed --
+
+  against the broken scratch copy: gateway FAILS, other six ok -> job exits 1
+  against the real repository:     all seven ok               -> job exits 0
+
+So CI now fails on the bug it previously passed, and still passes on correct
+code. ci.yml re-validated as YAML.
