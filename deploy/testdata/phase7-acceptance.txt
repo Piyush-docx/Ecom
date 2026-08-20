@@ -117,3 +117,43 @@ Acceptance criteria
   [NOTE] saga throughput ceiling of ~1 order/s identified and quantified
 
 Raw artifacts: deploy/k6/results/
+
+
+Addendum: test verification, and a trap worth recording
+--------------------------------------------------------
+The gateway/go.mod fix needed verifying against the real backends. The first
+attempt ran the suites while the FULL stack was up and reported "ok" for every
+module -- which was wrong.
+
+deploy/docker-compose.full.yml publishes exactly one port, 8000 on the load
+balancer. Redis, Postgres and Kafka are reachable only inside the Docker
+network, by design: k6 drives the stack the way a client would. So host-run
+tests could not reach any backend and every integration test skipped. Each
+module still printed "ok", because a skipped test is not a failed one, and the
+~56s runtimes looked like real work while actually being connection backoff.
+
+Confirmed by counting skips rather than trusting the status line:
+
+  services/auth   11 tests, 11 skipped ("no Redis at ...", "no database at ...")
+
+deploy/docker-compose.yml (the dev stack) publishes 6379, 5432, 9092 and 9090.
+Re-running against it:
+
+  ratelimiter      0 skipped (was 11)
+  services/auth    0 skipped (was 11)
+
+Final state, every module with -race against live backends:
+
+  pkg                race PASS
+  ratelimiter        race PASS
+  gateway            race PASS
+  services/auth      race PASS, 0 skipped
+  services/catalog   race PASS, 0 skipped
+  services/orders    race PASS, 0 skipped
+  services/payment   race PASS, 0 skipped
+
+  gofmt: clean.  go vet: clean across all seven modules.
+
+This is exactly the failure the CI skip-guard exists to catch, and it is worth
+remembering that "ok" from `go test` means "nothing failed", not "something
+ran". The two stacks cannot both be up: they bind the same host ports.
