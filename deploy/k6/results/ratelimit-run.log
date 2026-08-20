@@ -1,0 +1,32 @@
+
+         /\      Grafana   /‾‾/  
+    /\  /  \     |\  __   /  /   
+   /  \/    \    | |/ /  /   ‾‾\ 
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/ 
+
+
+     execution: local
+        script: /scripts/ratelimit.js
+        output: -
+
+     scenarios: (100.00%) 1 scenario, 50 max VUs, 1m30s max duration (incl. graceful stop):
+              * burst: 500 iterations shared among 50 VUs (maxDuration: 1m0s, gracefulStop: 30s)
+
+=== Phase 7 (a): distributed rate limit across two gateway instances ===
+
+  base url:            http://loadbalancer:80
+  configured limit:    100 per window
+  requests sent:       500
+
+  allowed:             100
+  denied (429):        400
+
+  if the limit were per-instance, roughly 200 would be allowed.
+  observed 100, which is consistent with ONE shared limit.
+
+  VERDICT: PASS — the limit holds across both instances combined
+time="2026-08-20T08:13:25Z" level=error msg="failed to handle the end-of-test summary" error="Could not save some summary information:\n\t- could not open 'deploy/k6/results/ratelimit-summary.txt': open deploy/k6/results/ratelimit-summary.txt: no such file or directory\n\t- could not open 'deploy/k6/results/ratelimit-raw.json': open deploy/k6/results/ratelimit-raw.json: no such file or directory"
+
+running (0m00.2s), 00/50 VUs, 500 complete and 0 interrupted iterations
+burst ✓ [ 100% ] 50 VUs  0m00.1s/1m0s  500/500 shared iters

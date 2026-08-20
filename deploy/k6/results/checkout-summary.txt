@@ -1,0 +1,28 @@
+=== Phase 7 (b): checkout flow under increasing concurrency ===
+
+  base url:              http://loadbalancer:80
+  duration:              151.0s
+
+  THROUGHPUT
+    http requests/sec:   188.8
+    orders created:      14256
+    orders rate-limited: 0
+    checkout failures:   0
+
+  CHECKOUT LATENCY (browse + order, end to end)
+    p50:                 530.0ms
+    p95:                 985.0ms
+    p99:                 1010.0ms
+    max:                 1052.0ms
+
+  PER-STEP LATENCY (p95)
+    browse product:      2.2ms
+    create order:        984.5ms
+
+  HTTP
+    failed rate:         0.00%
+    p95 request:         933.8ms
+
+  Note: create_order is synchronous through pricing and stock reservation;
+  the payment saga completes asynchronously after the 201 is returned, so
+  it is deliberately not inside this latency figure.

@@ -83,7 +83,10 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8081/healthz"]
+      # -O /dev/null, not --spider: --spider sends HEAD, and /healthz is
+      # registered with chi's r.Get, which answers HEAD with 405. wget exits
+      # 8 on that, so every container would sit unhealthy forever.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8081/healthz"]
       interval: 3s
       timeout: 3s
       retries: 20
@@ -99,7 +102,7 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8082/healthz"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8082/healthz"]
       interval: 3s
       timeout: 3s
       retries: 20
@@ -118,7 +121,7 @@ services:
       kafka: {condition: service_healthy}
       catalog: {condition: service_healthy}
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8083/healthz"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8083/healthz"]
       interval: 3s
       timeout: 3s
       retries: 20
@@ -138,7 +141,7 @@ services:
       postgres: {condition: service_healthy}
       kafka: {condition: service_healthy}
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8084/healthz"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8084/healthz"]
       interval: 3s
       timeout: 3s
       retries: 20
@@ -168,7 +171,7 @@ services:
       orders: {condition: service_healthy}
       payment: {condition: service_healthy}
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/healthz"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/healthz"]
       interval: 3s
       timeout: 3s
       retries: 20

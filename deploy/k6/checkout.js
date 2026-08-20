@@ -14,6 +14,9 @@ import http from 'k6/http';
 import { check, group } from 'k6';
 import { Trend, Counter, Rate } from 'k6/metrics';
 
+// OUT_DIR so the same script works inside the k6 container (where the repo
+// is not mounted at its host path) and from a local k6 binary.
+const OUT_DIR = __ENV.OUT_DIR || 'deploy/k6/results';
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8000';
 
 // Per-step latency, so a slow checkout can be attributed rather than guessed
@@ -49,6 +52,9 @@ export const options = {
       ],
     },
   },
+  // k6's default trend stats omit p(99); the summary reports it, so it must
+  // be requested explicitly or it comes back undefined.
+  summaryTrendStats: ['avg', 'min', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'],
   thresholds: {
     // Recorded rather than enforced as a hard gate: the point of this run is to
     // discover the numbers, and a threshold that fails the run would stop it
@@ -179,7 +185,7 @@ export function handleSummary(data) {
 
   return {
     stdout: text,
-    'deploy/k6/results/checkout-summary.txt': text,
-    'deploy/k6/results/checkout-raw.json': JSON.stringify(data, null, 2),
+    [`${OUT_DIR}/checkout-summary.txt`]: text,
+    [`${OUT_DIR}/checkout-raw.json`]: JSON.stringify(data, null, 2),
   };
 }

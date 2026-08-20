@@ -1,0 +1,13 @@
+=== Phase 7 (a): distributed rate limit across two gateway instances ===
+
+  base url:            http://loadbalancer:80
+  configured limit:    100 per window
+  requests sent:       500
+
+  allowed:             100
+  denied (429):        400
+
+  if the limit were per-instance, roughly 200 would be allowed.
+  observed 100, which is consistent with ONE shared limit.
+
+  VERDICT: PASS — the limit holds across both instances combined

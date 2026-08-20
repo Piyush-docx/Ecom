@@ -7,7 +7,12 @@
 # every service depends on ./pkg through a local `replace` directive. A context
 # scoped to the service alone could not see it.
 
-FROM golang:1.24-alpine AS build
+# golang:1.25 (Debian-based), not -alpine: six of the eight modules declare
+# `go 1.25.0`, so a 1.24 toolchain refuses to build them outright. The Debian
+# variant rather than alpine because the alpine 1.25 blob would otherwise be a
+# second large download, and the build produces a static CGO_ENABLED=0 binary
+# that does not depend on the builder's libc either way.
+FROM golang:1.25 AS build
 
 # MODULE is the path to build, e.g. "services/auth" or "gateway".
 ARG MODULE

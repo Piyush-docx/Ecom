@@ -1,0 +1,142 @@
+{
+    "root_group": {
+        "id": "d41d8cd98f00b204e9800998ecf8427e",
+        "groups": {},
+        "checks": {
+                "denied response has Retry-After": {
+                    "name": "denied response has Retry-After",
+                    "path": "::denied response has Retry-After",
+                    "id": "7168c1f6529673d464010fab4d4e7536",
+                    "passes": 400,
+                    "fails": 0
+                },
+                "denied response has X-RateLimit-Limit": {
+                    "path": "::denied response has X-RateLimit-Limit",
+                    "id": "65374e9c4b19b665cdeccf87435e63ac",
+                    "passes": 400,
+                    "fails": 0,
+                    "name": "denied response has X-RateLimit-Limit"
+                }
+            },
+        "name": "",
+        "path": ""
+    },
+    "metrics": {
+        "http_req_tls_handshaking": {
+            "avg": 0,
+            "min": 0,
+            "med": 0,
+            "max": 0,
+            "p(90)": 0,
+            "p(95)": 0
+        },
+        "http_req_receiving": {
+            "avg": 0.1280341097804392,
+            "min": 0.004416,
+            "med": 0.008917,
+            "max": 3.862375,
+            "p(90)": 0.058375,
+            "p(95)": 0.199209
+        },
+        "http_req_failed": {
+            "passes": 400,
+            "fails": 101,
+            "value": 0.7984031936127745
+        },
+        "ratelimit_allowed": {
+            "count": 100,
+            "rate": 630.0619889008028
+        },
+        "http_req_blocked": {
+            "p(90)": 0.041667,
+            "p(95)": 0.186,
+            "avg": 0.03770408582834318,
+            "min": 0.000458,
+            "med": 0.000917,
+            "max": 1.707917
+        },
+        "http_req_duration": {
+            "min": 0.189334,
+            "med": 2.687834,
+            "max": 76.355208,
+            "p(90)": 27.960208,
+            "p(95)": 43.311583,
+            "avg": 7.510888650698601
+        },
+        "http_req_waiting": {
+            "max": 76.027417,
+            "p(90)": 27.63375,
+            "p(95)": 43.292417,
+            "avg": 7.337435203592814,
+            "min": 0.141541,
+            "med": 2.608209
+        },
+        "iteration_duration": {
+            "med": 2.8684795000000003,
+            "max": 63.849583,
+            "p(90)": 19.793929500000104,
+            "p(95)": 43.54704854999999,
+            "avg": 7.595246753999995,
+            "min": 0.225125
+        },
+        "http_req_sending": {
+            "avg": 0.045419337325349175,
+            "min": 0.001583,
+            "med": 0.002708,
+            "max": 3.598084,
+            "p(90)": 0.0355,
+            "p(95)": 0.117459
+        },
+        "data_sent": {
+            "count": 203220,
+            "rate": 1280411.9738442115
+        },
+        "ratelimit_denied": {
+            "count": 400,
+            "rate": 2520.2479556032113
+        },
+        "http_reqs": {
+            "count": 501,
+            "rate": 3156.6105643930223
+        },
+        "iterations": {
+            "count": 500,
+            "rate": 3150.3099445040143
+        },
+        "data_received": {
+            "rate": 1278414.677339396,
+            "count": 202903
+        },
+        "ratelimit_unexpected_status": {
+            "count": 0,
+            "rate": 0,
+            "thresholds": {
+                "count==0": false
+            }
+        },
+        "checks": {
+            "passes": 800,
+            "fails": 0,
+            "value": 1
+        },
+        "http_req_duration{expected_response:true}": {
+            "p(90)": 48.432584,
+            "p(95)": 53.454208,
+            "avg": 26.217766495049492,
+            "min": 3.418667,
+            "med": 27.960208,
+            "max": 76.355208
+        },
+        "http_req_connecting": {
+            "p(90)": 0.024417,
+            "p(95)": 0.138667,
+            "avg": 0.023686622754491016,
+            "min": 0,
+            "med": 0,
+            "max": 1.360708
+        }
+    },
+    "setup_data": {
+        "token": "<JWT-REDACTED>"
+    }
+}

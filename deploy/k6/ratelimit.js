@@ -18,6 +18,9 @@ import { check } from 'k6';
 import { Counter } from 'k6/metrics';
 import exec from 'k6/execution';
 
+// OUT_DIR so the same script works inside the k6 container (where the repo
+// is not mounted at its host path) and from a local k6 binary.
+const OUT_DIR = __ENV.OUT_DIR || 'deploy/k6/results';
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8000';
 const RATE_LIMIT = parseInt(__ENV.RATE_LIMIT || '100', 10);
 
@@ -118,7 +121,7 @@ export function handleSummary(data) {
 
   return {
     stdout: text,
-    'deploy/k6/results/ratelimit-summary.txt': text,
-    'deploy/k6/results/ratelimit-raw.json': JSON.stringify(data, null, 2),
+    [`${OUT_DIR}/ratelimit-summary.txt`]: text,
+    [`${OUT_DIR}/ratelimit-raw.json`]: JSON.stringify(data, null, 2),
   };
 }
