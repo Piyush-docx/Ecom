@@ -1,0 +1,62 @@
+# Multi-stage build shared by all four services and the gateway.
+#
+# One parameterised Dockerfile rather than five near-identical ones: the build
+# steps are the same, and five copies would drift.
+#
+# The build context is the repository root, not the module directory, because
+# every service depends on ./pkg through a local `replace` directive. A context
+# scoped to the service alone could not see it.
+
+FROM golang:1.24-alpine AS build
+
+# MODULE is the path to build, e.g. "services/auth" or "gateway".
+ARG MODULE
+# BINARY is the output name, e.g. "auth".
+ARG BINARY
+
+WORKDIR /src
+
+# Copy the module graph first so dependency download is cached independently of
+# source changes. Without this split, editing one line of Go re-downloads every
+# dependency.
+COPY pkg/go.mod pkg/go.sum ./pkg/
+COPY ratelimiter/go.mod ratelimiter/go.sum ./ratelimiter/
+COPY gateway/go.mod gateway/go.sum ./gateway/
+COPY services/auth/go.mod services/auth/go.sum ./services/auth/
+COPY services/catalog/go.mod services/catalog/go.sum ./services/catalog/
+COPY services/orders/go.mod services/orders/go.sum ./services/orders/
+COPY services/payment/go.mod services/payment/go.sum ./services/payment/
+
+# Each module resolves its siblings through its own `replace`, so the build
+# works without go.work. GOWORK=off makes that explicit and matches how CI
+# builds each module in isolation.
+ENV GOWORK=off
+RUN cd ${MODULE} && go mod download
+
+COPY pkg/ ./pkg/
+COPY ratelimiter/ ./ratelimiter/
+COPY gateway/ ./gateway/
+COPY services/ ./services/
+
+# CGO_ENABLED=0 produces a static binary, which is what lets the final stage be
+# a bare alpine image with no libc to match.
+RUN cd ${MODULE} && CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/${BINARY} .
+
+FROM alpine:3.20
+
+ARG BINARY
+
+# ca-certificates for outbound TLS (a real Stripe call in place of the stub),
+# wget for the container healthcheck.
+RUN apk add --no-cache ca-certificates wget
+
+# An unprivileged user: a compromised service should not be root inside its
+# container.
+RUN adduser -D -u 10001 app
+USER app
+
+COPY --from=build /out/${BINARY} /usr/local/bin/service
+
+# The binary is renamed to a fixed path so the entrypoint does not need to know
+# which service this image holds.
+ENTRYPOINT ["/usr/local/bin/service"]

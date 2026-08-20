@@ -1,0 +1,36 @@
+# Scrape configuration for the full containerized stack.
+#
+# Distinct from prometheus.yml, which targets host.docker.internal for services
+# run with `go run`. Here everything is a container, so targets are service
+# names on the compose network.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Both gateway instances are scraped separately. During the load test this is
+  # what shows traffic actually reaching both -- a rate-limit result measured
+  # against a load balancer that quietly pinned every request to one instance
+  # would prove nothing about the distributed claim.
+  - job_name: gateways
+    static_configs:
+      - targets: ["gateway-1:8080"]
+        labels: {instance_name: gateway-1}
+      - targets: ["gateway-2:8080"]
+        labels: {instance_name: gateway-2}
+
+  - job_name: services
+    static_configs:
+      - targets: ["auth:8081"]
+        labels: {component: auth}
+      - targets: ["catalog:8082"]
+        labels: {component: catalog}
+      - targets: ["orders:8083"]
+        labels: {component: orders}
+      - targets: ["payment:8084"]
+        labels: {component: payment}
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

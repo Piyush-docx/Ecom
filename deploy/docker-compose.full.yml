@@ -1,0 +1,204 @@
+# The full stack for Phase 7: load balancer, two gateway instances, four
+# services, and all infrastructure.
+#
+#   docker compose -f deploy/docker-compose.full.yml up -d --build
+#
+# Kept separate from docker-compose.yml, which stays a fast infrastructure-only
+# file for the test suite. This one builds five images and is not what you want
+# running while iterating on a unit test.
+#
+# The topology is what Phase 7 measures: two gateways behind nginx, sharing
+# nothing but Redis. A rate limit that holds at its configured value across both
+# is the claim the whole project exists to demonstrate.
+
+name: ecom-full
+
+x-service-build: &service-build
+  # The repository root is the build context, because every module resolves
+  # ./pkg through a local replace directive.
+  context: ..
+  dockerfile: deploy/Dockerfile.service
+
+x-common-env: &common-env
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  KAFKA_BROKERS: kafka:29092
+
+services:
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ecom
+      POSTGRES_PASSWORD: ecom
+      POSTGRES_DB: ecom
+    volumes:
+      - full_postgres_data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ecom -d ecom"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  kafka:
+    image: confluentinc/cp-kafka:7.7.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
+
+  auth:
+    build:
+      <<: *service-build
+      args: {MODULE: services/auth, BINARY: auth}
+    environment:
+      <<: *common-env
+      AUTH_ADDR: ":8081"
+      AUTH_DATABASE_URL: postgres://ecom:ecom@postgres:5432/ecom_auth?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8081/healthz"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  catalog:
+    build:
+      <<: *service-build
+      args: {MODULE: services/catalog, BINARY: catalog}
+    environment:
+      <<: *common-env
+      CATALOG_ADDR: ":8082"
+      CATALOG_DATABASE_URL: postgres://ecom:ecom@postgres:5432/ecom_catalog?sslmode=disable
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8082/healthz"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  orders:
+    build:
+      <<: *service-build
+      args: {MODULE: services/orders, BINARY: orders}
+    environment:
+      <<: *common-env
+      ORDERS_ADDR: ":8083"
+      ORDERS_DATABASE_URL: postgres://ecom:ecom@postgres:5432/ecom_orders?sslmode=disable
+      CATALOG_SERVICE_URL: http://catalog:8082
+    depends_on:
+      postgres: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+      catalog: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8083/healthz"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  payment:
+    build:
+      <<: *service-build
+      args: {MODULE: services/payment, BINARY: payment}
+    environment:
+      <<: *common-env
+      PAYMENT_ADDR: ":8084"
+      PAYMENT_DATABASE_URL: postgres://ecom:ecom@postgres:5432/ecom_payment?sslmode=disable
+      # A deterministic decline amount, so the load test can exercise the
+      # compensating path on demand rather than by chance.
+      PAYMENT_FAIL_AMOUNT_CENTS: "66600"
+    depends_on:
+      postgres: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8084/healthz"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # Two gateway instances, identical but for their name. They share only Redis,
+  # which is what makes the distributed rate limit a real claim rather than a
+  # single-process counter.
+  gateway-1: &gateway
+    build:
+      <<: *service-build
+      args: {MODULE: gateway, BINARY: gateway}
+    environment: &gateway-env
+      <<: *common-env
+      GATEWAY_ADDR: ":8080"
+      REDIS_ADDR: redis:6379
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      RATE_LIMIT: ${RATE_LIMIT:-100}
+      RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-1m}
+      AUTH_SERVICE_URL: http://auth:8081
+      CATALOG_SERVICE_URL: http://catalog:8082
+      ORDERS_SERVICE_URL: http://orders:8083
+      PAYMENT_SERVICE_URL: http://payment:8084
+    depends_on:
+      redis: {condition: service_healthy}
+      auth: {condition: service_healthy}
+      catalog: {condition: service_healthy}
+      orders: {condition: service_healthy}
+      payment: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/healthz"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  gateway-2:
+    <<: *gateway
+    environment:
+      <<: *gateway-env
+
+  loadbalancer:
+    image: nginx:1.27-alpine
+    ports:
+      # The only port published to the host: k6 drives the stack through the
+      # load balancer, exactly as a client would.
+      - "8000:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      gateway-1: {condition: service_healthy}
+      gateway-2: {condition: service_healthy}
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus-full.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - gateway-1
+      - gateway-2
+
+volumes:
+  full_postgres_data:

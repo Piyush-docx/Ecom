@@ -1,0 +1,4 @@
+Load test results land here.
+
+IMPLEMENTATION_PLAN.md §2.6 is explicit that these numbers are measured,
+never estimated, so this directory stays empty until a real run fills it.

@@ -52,3 +52,24 @@ ok  	pkg/metrics	0.306s
   Cardinality is the one that matters most: labelling by concrete path
   lets a client with unique IDs create unbounded time series and take
   down the monitoring that is supposed to explain the outage.
+
+=== ADDENDUM: Prometheus scrape verified (was outstanding) ===
+Verified: 2026-08-20
+
+The Phase 6 commit recorded one gap -- the Prometheus container scraping
+live targets was unproven, because Docker stopped before it could be
+checked. It has now been verified:
+
+  Prometheus target health
+    catalog       host.docker.internal:8082        up
+    prometheus    localhost:9090                   up
+    (auth, orders, payment, gateway showed down only because those
+     processes were not running for this check)
+
+  Samples actually stored, not merely scraped:
+    up{job="services",instance="host.docker.internal:8082"} = 1
+    http_requests_total{service="catalog",route="/healthz",status="200"} = 1
+
+The `service` label and the route *pattern* both survive the scrape, which
+is what makes a single Prometheus able to separate five processes without
+unbounded cardinality.
