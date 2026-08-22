@@ -157,6 +157,34 @@ token:
 ln -s ../../scripts/redact-k6-results.sh .git/hooks/pre-commit
 ```
 
+## Summary
+
+> Built a microservices e-commerce backend (Go, Redis, Kafka, Postgres, Docker)
+> with a custom Redis-backed rate limiter that enforces one shared limit across
+> horizontally-scaled API gateway instances: 500 concurrent requests against a
+> limit of 100 admitted **exactly 100**, where per-instance limiting would have
+> admitted ~200. Enforcement is a Lua script evaluated inside Redis, making
+> check-and-decrement atomic — a non-atomic GET-then-INCR prototype admitted
+> 1000 of 1000 under the same load. Implemented the order-payment flow as a
+> choreographed saga with idempotent consumers and compensating transactions,
+> where idempotency is enforced by a unique index proven load-bearing: with it
+> dropped, 8 concurrent deliveries of one event charged the customer 3 times.
+
+Sustained throughput was **188.8 req/s** with **14,256 orders created and zero
+failures**; end-to-end checkout latency was p50 530ms / p95 985ms / p99 1010ms.
+
+Those latency numbers deserve their context rather than a headline. They were
+measured at 200 req/s offered load against the whole stack on a single laptop
+Docker VM (8 CPUs, 4 GiB), so they describe the system *at saturation*, not the
+cost of a request. The split makes that plain — browsing a product is 2.2ms p95
+while creating an order is 984.5ms p95, because order creation prices from the
+catalog and reserves stock synchronously. It is a queueing number, and a
+different machine would produce a different one.
+
+The rate-limiter result is the durable claim: exactly-100-of-500 is a property
+of the design, reproduced across three separate runs, and does not depend on the
+hardware it was measured on.
+
 ## Design decisions
 
 Recorded as ADRs, each with the alternatives that were real candidates and what
