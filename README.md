@@ -75,9 +75,16 @@ docker compose -f deploy/docker-compose.full.yml up -d --build
 
 Eleven containers: nginx, two gateways, four services, Redis, Postgres, Kafka,
 Prometheus. Two ports reach the host — **8000** for the load balancer and
-**9090** for Prometheus. Redis, Postgres, Kafka and the services themselves are
-reachable only inside the Docker network, so k6 drives the stack exactly as a
-client would.
+**9090** for Prometheus.
+
+Timed from a clean `git clone` on a machine that already had the base images:
+**3m07s** to eleven healthy containers and a working authenticated request. A
+first-ever run also pulls about 3.7 GB of base images (golang, Kafka, Postgres,
+Prometheus, nginx, Redis, Alpine), which on a slow link dominates everything
+else — budget for the download, not the build.
+
+Redis, Postgres, Kafka and the services themselves are reachable only inside the
+Docker network, so k6 drives the stack exactly as a client would.
 
 ```sh
 # sign up (public route, rate limited by IP)

@@ -1,0 +1,73 @@
+Phase 9 acceptance evidence: ship
+=================================
+
+Acceptance criterion, quoted from IMPLEMENTATION_PLAN.md Phase 9:
+
+  "a stranger can clone the repo, run one command, and have the whole stack
+   up with a working example request in under 5 minutes."
+
+Tested on 2026-08-22 by actually doing it, not by reasoning about it: a fresh
+`git clone` of the public remote into an empty directory, then the README's
+quick-start block run verbatim.
+
+  git clone https://github.com/Piyush-docx/Ecom.git repo    1s
+  cp .env.example .env
+  export JWT_SECRET="$(openssl rand -hex 32)"
+  docker compose -f deploy/docker-compose.full.yml up -d --build
+
+  11 containers healthy                                     175s
+  POST /auth/signup  -> token (295 chars)
+  GET  /catalog/products with that token -> 200
+
+  TOTAL, clone to working authenticated request:            187s (3m07s)
+
+  VERDICT: PASS, with the caveat below.
+
+What the clone contained
+------------------------
+.env.example present, .env absent -- the gitignore rule holds against a real
+clone, not just locally.
+
+The caveat: warm vs cold image cache
+-------------------------------------
+The 3m07s was measured on a machine that already had every base image. The
+build log shows 714 pull-related lines, but those were layer-existence checks
+against a full local cache, not downloads.
+
+A first-ever run pulls roughly 3.7 GB:
+
+  confluentinc/cp-kafka:7.7.1   1.43 GB
+  golang:1.25                   1.27 GB
+  postgres:16-alpine            411 MB
+  prom/prometheus:v2.55.1       396 MB
+  grafana/k6:latest             103 MB
+  nginx:1.27-alpine             76.8 MB
+  redis:7-alpine                58.7 MB
+  alpine:3.20                   13.7 MB
+
+On the ~200-340 KB/s link measured during Phase 7 that is hours, not minutes.
+On a normal connection it is a few minutes. The criterion is met for the case
+it describes -- one command, no manual steps, no editing files beyond copying
+.env.example -- but the honest statement is "3m07s warm, download-bound cold",
+and the README now says exactly that rather than letting the 5-minute figure
+imply something it did not measure.
+
+Other Phase 9 deliverables
+--------------------------
+  [PASS] README with architecture diagram, setup, and captured load numbers
+  [PASS] CI running tests on every push (GitHub Actions, green on every
+         commit from 6456cb8 onward)
+  [PASS] secrets pass: no hardcoded credentials in tracked source, no JWTs
+         or private keys in git history, .env never committed
+  [PASS] .env.example committed, covering all 30 environment variables the
+         code reads, with defaults read out of the source
+  [PASS] resume bullet filled in with measured numbers (README "Summary")
+
+A leak found and fixed during this phase
+-----------------------------------------
+Running the README's own k6 command rewrote deploy/k6/results/ratelimit-raw.json
+with a live JWT and staged it. k6's raw output embeds whole request bodies, and
+every load run recreates them, so hand-redaction would have to be remembered
+every time. scripts/redact-k6-results.sh strips them and re-stages the file;
+installed as a pre-commit hook it makes that automatic. Tested against a planted
+token, confirmed idempotent, JSON still parses afterwards.
